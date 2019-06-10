@@ -21,6 +21,8 @@ def define_loss(pre, y_train):
     print(sess.run(l))
     print(sess.run(cl))
 
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 with tf.Session() as sess:
     tf.global_variables_initializer().run()
     print(sess.run(loss))
