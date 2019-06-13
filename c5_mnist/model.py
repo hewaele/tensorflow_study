@@ -7,13 +7,15 @@ class Model():
     lr 学习率
     decay    学习率衰减
     """
-    def __init__(self, net_shape=None, lr=0.005, decay=0.9, epoch=100, batch=50, save_path=''):
+    def __init__(self, x, y, net_shape=None, lr=0.0005, decay=0.9, epoch=30000, batch=100, save_path='./output/model.ckpt'):
         self.net_shape = net_shape
         self.lr = lr
         self.decay = decay
         self.epoch = epoch
         self.batch = batch
         self.save_path = save_path
+        self.input = x
+        self.output = y
 
         self.build()
 
@@ -21,13 +23,10 @@ class Model():
     构建网络
     """
     def build(self):
-        self.input = tf.placeholder(shape=[None, self.net_shape[0]], dtype=tf.float32, name='input')
-        self.output = tf.placeholder(shape=[None, self.net_shape[-1]], dtype=tf.float32, name='output')
-
         front = self.input
         for index, hi in enumerate(self.net_shape[:-1]):
             w = tf.Variable(tf.truncated_normal(shape=[hi, self.net_shape[index+1]], dtype=tf.float32, stddev=0.1))
-            b = tf.Variable(tf.zeros(shape=[self.net_shape[index+1]], dtype=tf.float32))
+            b = tf.Variable(tf.constant(0.1, shape=[self.net_shape[index+1]], dtype=tf.float32))
 
             h = tf.nn.relu(tf.add(tf.matmul(front, w), b))
             front = h
@@ -38,42 +37,46 @@ class Model():
     """
     构建训练过程
     """
-    def train(self, train_x, train_y):
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.output, logits=self.pre))
+    def train(self):
+        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.output, logits=self.pre))
         acc = tf.equal(tf.argmax(self.pre, 1), tf.argmax(self.output, 1))
         acc = tf.reduce_mean(tf.cast(acc, dtype=tf.float32))
         op = tf.train.AdamOptimizer(self.lr).minimize(loss)
 
-        #将训练数据转换为datasets格式
-        dataset = tf.data.Dataset.from_tensor_slices((train_x, train_y)).batch(self.batch)
-        dataset = dataset.make_one_shot_iterator()
         import os
         os.environ['CUDA_VISIBLE_DEVICES'] = '1'
         with tf.Session() as sess:
             tf.global_variables_initializer().run()
             for i in range(self.epoch):
-                x, y = dataset.get_next()
-                x, y = sess.run([x, y])
-                y = [[int(j==i) for j in range(10)] for i in y]
-                _, l, point = sess.run([op, loss, acc], feed_dict={self.input: x, self.output: y})
-                print('epoch{}: loss:{} acc:{}'.format(i, l, point))
-        print('trian done')
-        self.save_model()
+                sess.run([op])
+
+                if i%500 == 0:
+                    l, point = sess.run([loss, acc])
+                    print('epoch{}: loss:{} acc:{}'.format(i, l, point))
+
+            print('trian done')
+            self.save_model(sess, self.save_path)
 
     def inference(self, x):
         model = self.load_model()
         with tf.Session() as sess:
             tf.global_variables_initializer().run()
+            sess.run(model, feed_dict={'input:0': x})
 
-
-    def save_model(self):
-        pass
+    def save_model(self, sess, path):
+        saver = tf.train.Saver()
+        saver.save(sess, path)
 
 
     def load_model(self):
+        saver = tf.train.import_meta_graph(self.save_path+'.meta')
+        with tf.Session() as sess:
+            saver.restore(sess, self.save_path)
+            predict = tf.get_default_graph().get_tensor_by_name('input:0')
+        return predict
 
-        return
-
+    def load_model2(self):
+        model = self.build()
 
 def load_data(path='/home/hewaele/PycharmProjects/tensorflow-study/c5_mnist/data/mnist.npz'):
     from tensorflow.keras.datasets import mnist
@@ -86,9 +89,28 @@ def load_data(path='/home/hewaele/PycharmProjects/tensorflow-study/c5_mnist/data
     return train_x, train_y, test_x, test_y
 
 if __name__ == "__main__":
-    mnist = Model(net_shape=[28*28, 500, 200, 10])
+    import numpy as np
+
     train_x, train_y, test_x, test_y = load_data()
-    mnist.train(train_x, train_y)
+
+    train_x = train_x.astype(np.float32)
+    train_y = [[float(v == j) for j in range(10)] for v in train_y]
+    test_y = [[float(v == j) for j in range(10)] for v in test_y]
+
+    # 将训练数据转换为datasets格式
+    dataset = tf.data.Dataset.from_tensor_slices((train_x, train_y))
+    dataset = dataset.repeat(100)
+    dataset = dataset.shuffle(100).batch(50)
+    it = dataset.make_one_shot_iterator()
+    x, y = it.get_next()
+    dataset = tf.data.Dataset.from_tensor_slices((test_x, test_y))
+    dataset = dataset.shuffle(1000).batch(500)
+    it = dataset.make_one_shot_iterator()
+    tx, ty = it.get_next()
+    x = tf.identity(x, name='inpyt')
+    print(x)
+    mnist = Model(x, y, net_shape=[28 * 28, 500, 200, 100, 10])
+    mnist.inference(tx)
 
 
 
